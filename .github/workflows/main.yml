@@ -17,24 +17,111 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.32.8'
+          flutter-version: "3.32.8"
           channel: stable
           cache: true
+
+      - name: Find ZIP
+        run: |
+          set -e
+          echo "Repository files:"
+          ls -lah
+
+          ZIP=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
+
+          if [ -z "$ZIP" ]; then
+            echo "❌ ZIP fayl topilmadi!"
+            exit 1
+          fi
+
+          echo "✅ ZIP topildi: $ZIP"
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Extract MILLIY AI
+        run: |
+          set -e
+          mkdir -p app
+          unzip -o "$ZIP" -d app
+
+          echo "Extract qilingan fayllar:"
+          find app -maxdepth 3 -type f | head -100
 
       - name: Find Flutter project
         run: |
           set -e
 
-          PUBSPEC=$(find . -name pubspec.yaml -type f | head -n 1)
+          PUBSPEC=$(find app -name pubspec.yaml -type f | head -n 1)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "pubspec.yaml topilmadi!"
+            echo "❌ pubspec.yaml topilmadi!"
+            find app -maxdepth 4 -type f | head -200
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PUBSPEC")
 
+          echo "✅ Flutter project: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Prepare Android
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          rm -rf android
+
+          flutter create \
+            --platforms=android \
+            --project-name=milliy_ai \
+            .
+
+      - name: Set Android NDK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("android/app/build.gradle.kts")
+          s = p.read_text()
+
+          if 'ndkVersion = "27.0.12077973"' not in s:
+              s = s.replace(
+                  "android {\n",
+                  'android {\n    ndkVersion = "27.0.12077973"\n',
+                  1
+              )
+
+          p.write_text(s)
+          print("✅ NDK 27 sozlandi")
+          PY
+
+      - name: Install dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+          flutter clean
+          flutter pub get
+
+      - name: Check Flutter
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+          flutter analyze
+
+      - name: Build APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+          flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MILLIY-AI-APK
+          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "Flutter project: $PROJECT_DIR"
 
       - name: Prepare Android
