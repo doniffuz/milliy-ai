@@ -3,7 +3,8 @@ name: Build MILLIY AI APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   build:
@@ -20,21 +21,110 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Extract MILLIY AI
+      - name: Find Flutter project
         run: |
           set -e
-          ZIP="MILLIY_AI_FULLSTACK_FIXED_v6.zip"
 
-          if [ ! -f "$ZIP" ]; then
-            echo "ZIP topilmadi: $ZIP"
-            ls -lah
+          PUBSPEC=$(find . -name pubspec.yaml -type f | head -n 1)
+
+          if [ -z "$PUBSPEC" ]; then
+            echo "pubspec.yaml topilmadi!"
             exit 1
           fi
 
-          mkdir -p app
-          unzip -o "$ZIP" -d app
+          PROJECT_DIR=$(dirname "$PUBSPEC")
 
-      - name: Find Flutter project
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Flutter project: $PROJECT_DIR"
+
+      - name: Prepare Android
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          rm -rf android
+
+          flutter create \
+            --platforms=android \
+            --project-name=milliy_ai .
+
+      - name: Set Android NDK 27
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("android/app/build.gradle.kts")
+          s = p.read_text()
+
+          if 'ndkVersion = "27.0.12077973"' not in s:
+              s = s.replace(
+                  "android {\n",
+                  'android {\n    ndkVersion = "27.0.12077973"\n',
+                  1
+              )
+
+          p.write_text(s)
+          PY
+
+          grep -n "ndkVersion" android/app/build.gradle.kts
+
+      - name: Set App Name
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+
+          s = s.replace(
+              'android:label="milliy_ai"',
+              'android:label="Milliy AI"'
+          )
+
+          if "android.permission.INTERNET" not in s:
+              s = s.replace(
+                  "<application",
+                  '<uses-permission android:name="android.permission.INTERNET" />\n'
+                  '<uses-permission android:name="android.permission.RECORD_AUDIO" />\n'
+                  "<application",
+                  1
+              )
+
+          p.write_text(s)
+          PY
+
+      - name: Install Dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+          flutter clean
+          flutter pub get
+
+      - name: Analyze
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          flutter analyze
+
+      - name: Build APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          flutter build apk --release \
+            --dart-define=API_BASE_URL=${{ secrets.API_BASE_URL }}
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MILLIY-AI-APK
+          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error      - name: Find Flutter project
         run: |
           set -e
 
