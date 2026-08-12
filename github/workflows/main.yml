@@ -1,0 +1,61 @@
+name: Build MILLIY AI APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.32.8"
+          channel: stable
+          cache: true
+
+      - name: Prepare Android
+        run: |
+          flutter create --platforms=android --project-name=milliy_ai .
+
+      - name: Set NDK
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("android/app/build.gradle.kts")
+          s=p.read_text()
+          if "ndkVersion" in s:
+              import re
+              s=re.sub(r'ndkVersion\s*=\s*".*?"',
+                       'ndkVersion = "27.0.12077973"', s)
+          else:
+              s=s.replace("android {",
+                          'android {\n    ndkVersion = "27.0.12077973"',1)
+          p.write_text(s)
+          PY
+
+      - name: Dependencies
+        run: |
+          flutter clean
+          flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Build
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MILLIY-AI-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
