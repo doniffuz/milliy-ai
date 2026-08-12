@@ -3,17 +3,59 @@ name: Build MILLIY AI APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
   build:
+    name: Build MILLIY AI APK
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Find and extract ZIP
+        shell: bash
+        run: |
+          set -e
+
+          ZIP=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
+
+          if [ -z "$ZIP" ]; then
+            echo "❌ ZIP fayl topilmadi!"
+            find . -maxdepth 2 -type f -print
+            exit 1
+          fi
+
+          echo "✅ ZIP topildi: $ZIP"
+
+          mkdir -p app
+          unzip -o "$ZIP" -d app
+
+      - name: Find Flutter project
+        shell: bash
+        run: |
+          set -e
+
+          PUBSPEC=$(find app -type f -name "pubspec.yaml" | head -n 1)
+
+          if [ -z "$PUBSPEC" ]; then
+            echo "❌ pubspec.yaml topilmadi!"
+            echo "ZIP ichidagi fayllar:"
+            find app -maxdepth 4 -type f | head -200
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PUBSPEC")
+
+          echo "✅ Flutter loyiha topildi:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -23,39 +65,94 @@ jobs:
           cache: true
 
       - name: Prepare Android
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
         run: |
-          flutter create --platforms=android --project-name=milliy_ai .
+          set -e
 
-      - name: Set NDK
+          rm -rf android
+
+          flutter create \
+            --platforms=android \
+            --project-name=milliy_ai \
+            .
+
+      - name: Set Android NDK
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
         run: |
+          set -e
+
           python3 - <<'PY'
           from pathlib import Path
-          p=Path("android/app/build.gradle.kts")
-          s=p.read_text()
+          import re
+
+          p = Path("android/app/build.gradle.kts")
+
+          if not p.exists():
+              raise SystemExit("android/app/build.gradle.kts topilmadi")
+
+          s = p.read_text()
+
           if "ndkVersion" in s:
-              import re
-              s=re.sub(r'ndkVersion\s*=\s*".*?"',
-                       'ndkVersion = "27.0.12077973"', s)
+              s = re.sub(
+                  r'ndkVersion\s*=\s*["\'][^"\']+["\']',
+                  'ndkVersion = "27.0.12077973"',
+                  s
+              )
           else:
-              s=s.replace("android {",
-                          'android {\n    ndkVersion = "27.0.12077973"',1)
+              s = s.replace(
+                  "android {",
+                  'android {\n    ndkVersion = "27.0.12077973"',
+                  1
+              )
+
           p.write_text(s)
+
+          print("✅ NDK 27.0.12077973 sozlandi")
           PY
 
-      - name: Dependencies
+      - name: Install dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
         run: |
+          set -e
           flutter clean
           flutter pub get
 
-      - name: Analyze
-        run: flutter analyze --no-fatal-infos
+      - name: Check Flutter project
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+          flutter analyze --no-fatal-infos
 
-      - name: Build
-        run: flutter build apk --release
+      - name: Build Release APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+          flutter build apk --release
+
+      - name: Verify APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "❌ APK yaratilmadi!"
+            exit 1
+          fi
+
+          echo "✅ APK tayyor:"
+          ls -lh "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: MILLIY-AI-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
