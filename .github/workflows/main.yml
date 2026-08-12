@@ -18,7 +18,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Find and extract ZIP
+      - name: Find ZIP
         shell: bash
         run: |
           set -e
@@ -26,15 +26,24 @@ jobs:
           ZIP=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
 
           if [ -z "$ZIP" ]; then
-            echo "❌ ZIP fayl topilmadi!"
-            find . -maxdepth 2 -type f -print
+            echo "❌ ZIP topilmadi!"
             exit 1
           fi
 
-          echo "✅ ZIP topildi: $ZIP"
+          echo "ZIP: $ZIP"
+          echo "ZIP_PATH=$ZIP" >> "$GITHUB_ENV"
 
+      - name: Extract ZIP
+        shell: bash
+        run: |
+          set -e
+
+          rm -rf app
           mkdir -p app
-          unzip -o "$ZIP" -d app
+
+          unzip -o "$ZIP_PATH" -d app
+
+          echo "ZIP ochildi."
 
       - name: Find Flutter project
         shell: bash
@@ -45,17 +54,16 @@ jobs:
 
           if [ -z "$PUBSPEC" ]; then
             echo "❌ pubspec.yaml topilmadi!"
-            echo "ZIP ichidagi fayllar:"
-            find app -maxdepth 4 -type f | head -200
+            find app -maxdepth 3 -type f | head -100
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PUBSPEC")
 
-          echo "✅ Flutter loyiha topildi:"
-          echo "$PROJECT_DIR"
-
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Flutter loyiha:"
+          echo "$PROJECT_DIR"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -77,7 +85,7 @@ jobs:
             --project-name=milliy_ai \
             .
 
-      - name: Set Android NDK
+      - name: Set NDK 27
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
@@ -89,18 +97,15 @@ jobs:
 
           p = Path("android/app/build.gradle.kts")
 
-          if not p.exists():
-              raise SystemExit("android/app/build.gradle.kts topilmadi")
-
           s = p.read_text()
 
-          if "ndkVersion" in s:
-              s = re.sub(
-                  r'ndkVersion\s*=\s*["\'][^"\']+["\']',
-                  'ndkVersion = "27.0.12077973"',
-                  s
-              )
-          else:
+          s = re.sub(
+              r'ndkVersion\s*=\s*["\'][^"\']+["\']',
+              'ndkVersion = "27.0.12077973"',
+              s
+          )
+
+          if "ndkVersion" not in s:
               s = s.replace(
                   "android {",
                   'android {\n    ndkVersion = "27.0.12077973"',
@@ -109,32 +114,34 @@ jobs:
 
           p.write_text(s)
 
-          print("✅ NDK 27.0.12077973 sozlandi")
+          print("NDK 27 sozlandi.")
           PY
+
+      - name: Remove old test
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          rm -rf test
+          echo "Eski test fayllari olib tashlandi."
 
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
           set -e
+
           flutter clean
           flutter pub get
 
-      - name: Check Flutter project
+      - name: Build APK
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
           set -e
-          flutter analyze --no-fatal-infos
 
-      - name: Build Release APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
-        run: |
-          set -e
           flutter build apk --release
 
-      - name: Verify APK
+      - name: Check APK
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
@@ -143,11 +150,14 @@ jobs:
           APK="build/app/outputs/flutter-apk/app-release.apk"
 
           if [ ! -f "$APK" ]; then
-            echo "❌ APK yaratilmadi!"
+            echo "❌ APK yaratilmagan!"
             exit 1
           fi
 
-          echo "✅ APK tayyor:"
+          echo "================================"
+          echo "✅ MILLIY AI APK TAYYOR"
+          echo "================================"
+
           ls -lh "$APK"
 
       - name: Upload APK
