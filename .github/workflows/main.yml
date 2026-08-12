@@ -21,19 +21,82 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Find ZIP
+      - name: Find MILLIY AI ZIP
         run: |
           set -e
-          echo "Repository files:"
-          ls -lah
-
-          ZIP=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
-
+          ZIP=$(find . -maxdepth 1 -type f -iname "*.zip" | grep -E 'FULLSTACK_FIXED_v8|FULLSTACK_FIXED_v7|FULLSTACK' | head -n 1 || true)
           if [ -z "$ZIP" ]; then
-            echo "❌ ZIP fayl topilmadi!"
+            ZIP=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1 || true)
+          fi
+          if [ -z "$ZIP" ]; then
+            echo "ZIP topilmadi!"
+            ls -lah
             exit 1
           fi
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+          echo "Topildi: $ZIP"
 
+      - name: Extract project
+        run: |
+          set -e
+          mkdir -p app
+          unzip -o "$ZIP" -d app
+
+      - name: Find Flutter project
+        run: |
+          set -e
+          PUBSPEC=$(find app -name pubspec.yaml -type f | head -n 1)
+          if [ -z "$PUBSPEC" ]; then
+            echo "pubspec.yaml topilmadi!"
+            exit 1
+          fi
+          PROJECT_DIR=$(dirname "$PUBSPEC")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Flutter project: $PROJECT_DIR"
+
+      - name: Prepare Android
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+          rm -rf android
+          flutter create --platforms=android --project-name=milliy_ai .
+
+      - name: Set Android NDK 27
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("android/app/build.gradle.kts")
+          s = p.read_text()
+          if 'ndkVersion = "27.0.12077973"' not in s:
+              s = s.replace(
+                  "android {\n",
+                  'android {\n    ndkVersion = "27.0.12077973"\n',
+                  1
+              )
+          p.write_text(s)
+          PY
+
+      - name: Install dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+          flutter clean
+          flutter pub get
+
+      - name: Build APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+          flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MILLIY-AI-APK
+          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
           echo "✅ ZIP topildi: $ZIP"
           echo "ZIP=$ZIP" >> "$GITHUB_ENV"
 
