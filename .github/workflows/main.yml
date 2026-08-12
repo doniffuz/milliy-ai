@@ -27,10 +27,11 @@ jobs:
 
           if [ -z "$ZIP" ]; then
             echo "❌ ZIP topilmadi!"
+            find . -maxdepth 2 -type f -print
             exit 1
           fi
 
-          echo "ZIP: $ZIP"
+          echo "✅ ZIP topildi: $ZIP"
           echo "ZIP_PATH=$ZIP" >> "$GITHUB_ENV"
 
       - name: Extract ZIP
@@ -43,8 +44,6 @@ jobs:
 
           unzip -o "$ZIP_PATH" -d app
 
-          echo "ZIP ochildi."
-
       - name: Find Flutter project
         shell: bash
         run: |
@@ -54,7 +53,7 @@ jobs:
 
           if [ -z "$PUBSPEC" ]; then
             echo "❌ pubspec.yaml topilmadi!"
-            find app -maxdepth 3 -type f | head -100
+            find app -maxdepth 4 -type f | head -200
             exit 1
           fi
 
@@ -62,8 +61,7 @@ jobs:
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Flutter loyiha:"
-          echo "$PROJECT_DIR"
+          echo "✅ Flutter loyiha: $PROJECT_DIR"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -85,7 +83,7 @@ jobs:
             --project-name=milliy_ai \
             .
 
-      - name: Set NDK 27
+      - name: Configure Android
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
@@ -96,33 +94,68 @@ jobs:
           import re
 
           p = Path("android/app/build.gradle.kts")
-
           s = p.read_text()
 
+          # compileSdk 36
+          s = re.sub(
+              r'compileSdk\s*=\s*\d+',
+              'compileSdk = 36',
+              s
+          )
+
+          if 'compileSdk = 36' not in s:
+              s = s.replace(
+                  'android {',
+                  'android {\n    compileSdk = 36',
+                  1
+              )
+
+          # NDK 27
           s = re.sub(
               r'ndkVersion\s*=\s*["\'][^"\']+["\']',
               'ndkVersion = "27.0.12077973"',
               s
           )
 
-          if "ndkVersion" not in s:
+          if 'ndkVersion = "27.0.12077973"' not in s:
               s = s.replace(
-                  "android {",
+                  'android {',
                   'android {\n    ndkVersion = "27.0.12077973"',
+                  1
+              )
+
+          # minSdk 24
+          s = re.sub(
+              r'minSdk\s*=\s*\d+',
+              'minSdk = 24',
+              s
+          )
+
+          s = re.sub(
+              r'minSdkVersion\s+\d+',
+              'minSdk = 24',
+              s
+          )
+
+          if 'minSdk = 24' not in s:
+              s = s.replace(
+                  'defaultConfig {',
+                  'defaultConfig {\n        minSdk = 24',
                   1
               )
 
           p.write_text(s)
 
-          print("NDK 27 sozlandi.")
+          print("✅ compileSdk = 36")
+          print("✅ ndkVersion = 27.0.12077973")
+          print("✅ minSdk = 24")
           PY
 
-      - name: Remove old test
+      - name: Remove old tests
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
           rm -rf test
-          echo "Eski test fayllari olib tashlandi."
 
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_DIR }}
@@ -141,7 +174,7 @@ jobs:
 
           flutter build apk --release
 
-      - name: Check APK
+      - name: Verify APK
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
@@ -154,9 +187,9 @@ jobs:
             exit 1
           fi
 
-          echo "================================"
+          echo "===================================="
           echo "✅ MILLIY AI APK TAYYOR"
-          echo "================================"
+          echo "===================================="
 
           ls -lh "$APK"
 
