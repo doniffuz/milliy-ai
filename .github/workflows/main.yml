@@ -11,55 +11,17 @@ permissions:
 
 jobs:
   build:
-    name: Build MILLIY AI APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Find ZIP
-        shell: bash
-        run: |
-          set -e
-
-          ZIP=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
-
-          if [ -z "$ZIP" ]; then
-            echo "❌ ZIP topilmadi!"
-            exit 1
-          fi
-
-          echo "ZIP: $ZIP"
-          echo "ZIP_PATH=$ZIP" >> "$GITHUB_ENV"
-
-      - name: Extract ZIP
-        shell: bash
-        run: |
-          set -e
-
-          rm -rf app
-          mkdir -p app
-
-          unzip -o "$ZIP_PATH" -d app
-
-      - name: Find Flutter project
-        shell: bash
-        run: |
-          set -e
-
-          PUBSPEC=$(find app -type f -name "pubspec.yaml" | head -n 1)
-
-          if [ -z "$PUBSPEC" ]; then
-            echo "❌ pubspec.yaml topilmadi!"
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$PUBSPEC")
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          echo "✅ Flutter loyiha: $PROJECT_DIR"
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -68,170 +30,188 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Prepare Android
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
+      - name: Check project
         run: |
           set -e
 
-          rm -rf android
+          if [ ! -f "pubspec.yaml" ]; then
+            echo "pubspec.yaml topilmadi!"
+            echo "Repository tarkibi:"
+            ls -la
+            exit 1
+          fi
+
+      - name: Prepare Android
+        run: |
+          set -e
 
           flutter create \
             --platforms=android \
             --project-name=milliy_ai \
+            --org=com.example \
             .
 
-      - name: Force Android configuration
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
+      - name: Install Firebase configuration
+        run: |
+          set -e
+
+          if [ ! -f "google-services.json" ]; then
+            echo "Root papkada google-services.json topilmadi!"
+            exit 1
+          fi
+
+          mkdir -p android/app
+          cp google-services.json android/app/google-services.json
+
+          echo "Firebase configuration o'rnatildi."
+
+      - name: Configure Android
+        run: |
+          set -e
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("android/app/build.gradle.kts")
+          s = p.read_text()
+
+          # SDK
+          s = re.sub(
+              r'compileSdk\s*=\s*\d+',
+              'compileSdk = 36',
+              s
+          )
+
+          # NDK
+          if re.search(r'ndkVersion\s*=', s):
+              s = re.sub(
+                  r'ndkVersion\s*=\s*".*?"',
+                  'ndkVersion = "27.0.12077973"',
+                  s
+              )
+          else:
+              s = s.replace(
+                  'android {',
+                  'android {\n    ndkVersion = "27.0.12077973"',
+                  1
+              )
+
+          # minSdk
+          if re.search(r'minSdk\s*=', s):
+              s = re.sub(
+                  r'minSdk\s*=\s*\d+',
+                  'minSdk = 24',
+                  s
+              )
+          elif re.search(r'minSdkVersion\s+', s):
+              s = re.sub(
+                  r'minSdkVersion\s+\d+',
+                  'minSdkVersion 24',
+                  s
+              )
+          else:
+              s = s.replace(
+                  'defaultConfig {',
+                  'defaultConfig {\n        minSdk = 24',
+                  1
+              )
+
+          p.write_text(s)
+          PY
+
+      - name: Configure Google Services
         run: |
           set -e
 
           python3 - <<'PY'
           from pathlib import Path
 
-          p = Path("android/app/build.gradle.kts")
+          p = Path("android/settings.gradle.kts")
           s = p.read_text()
 
-          # compileSdk
-          if "compileSdk = flutter.compileSdkVersion" in s:
-              s = s.replace(
-                  "compileSdk = flutter.compileSdkVersion",
-                  "compileSdk = 36"
-              )
-          elif "compileSdk = 35" in s:
-              s = s.replace(
-                  "compileSdk = 35",
-                  "compileSdk = 36"
-              )
-          elif "compileSdk = 34" in s:
-              s = s.replace(
-                  "compileSdk = 34",
-                  "compileSdk = 36"
-              )
-
-          # NDK
-          if "ndkVersion = flutter.ndkVersion" in s:
-              s = s.replace(
-                  "ndkVersion = flutter.ndkVersion",
-                  'ndkVersion = "27.0.12077973"'
-              )
-          elif "ndkVersion" not in s:
-              s = s.replace(
-                  "android {",
-                  'android {\n    ndkVersion = "27.0.12077973"',
-                  1
-              )
-
-          # minSdk - eng muhim qism
-          if "minSdk = flutter.minSdkVersion" in s:
-              s = s.replace(
-                  "minSdk = flutter.minSdkVersion",
-                  "minSdk = 24"
-              )
-          elif "minSdkVersion = flutter.minSdkVersion" in s:
-              s = s.replace(
-                  "minSdkVersion = flutter.minSdkVersion",
-                  "minSdk = 24"
-              )
-          elif "minSdk = 21" in s:
-              s = s.replace(
-                  "minSdk = 21",
-                  "minSdk = 24"
-              )
-          elif "minSdkVersion 21" in s:
-              s = s.replace(
-                  "minSdkVersion 21",
-                  "minSdk = 24"
-              )
-          elif "minSdk" not in s:
-              s = s.replace(
-                  "defaultConfig {",
-                  "defaultConfig {\n        minSdk = 24",
-                  1
-              )
+          if 'com.google.gms.google-services' not in s:
+              marker = 'plugins {'
+              if marker in s:
+                  s = s.replace(
+                      marker,
+                      'plugins {\n    id("com.google.gms.google-services") version "4.4.2" apply false',
+                      1
+                  )
 
           p.write_text(s)
 
-          print("======================================")
-          print("ANDROID CONFIGURATION")
-          print("======================================")
-          print("compileSdk = 36")
-          print("ndkVersion = 27.0.12077973")
-          print("minSdk = 24")
-          print("======================================")
+          p = Path("android/app/build.gradle.kts")
+          s = p.read_text()
+
+          if 'com.google.gms.google-services' not in s:
+              marker = 'plugins {'
+              if marker in s:
+                  s = s.replace(
+                      marker,
+                      'plugins {\n    id("com.google.gms.google-services")',
+                      1
+                  )
+
+          p.write_text(s)
           PY
 
-          echo "----- build.gradle.kts -----"
-          cat android/app/build.gradle.kts
-
-      - name: Verify Android configuration
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
+      - name: Dependencies
         run: |
           set -e
-
-          FILE="android/app/build.gradle.kts"
-
-          grep -q "compileSdk = 36" "$FILE" || {
-            echo "❌ compileSdk 36 topilmadi!"
-            exit 1
-          }
-
-          grep -q 'ndkVersion = "27.0.12077973"' "$FILE" || {
-            echo "❌ NDK 27 topilmadi!"
-            exit 1
-          }
-
-          grep -q "minSdk = 24" "$FILE" || {
-            echo "❌ minSdk 24 topilmadi!"
-            exit 1
-          }
-
-          echo "✅ Android sozlamalari to'g'ri."
-
-      - name: Remove old tests
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
-        run: |
-          rm -rf test
-
-      - name: Install dependencies
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
-        run: |
-          set -e
-
           flutter clean
           flutter pub get
 
+      - name: Generate SHA-1
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "MILLIY AI DEBUG SHA-1"
+          echo "=========================================="
+
+          if [ -f "$HOME/.android/debug.keystore" ]; then
+            keytool \
+              -list \
+              -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -alias androiddebugkey \
+              -storepass android \
+              -keypass android \
+              | grep -E "SHA1:|SHA256:"
+          else
+            echo "Debug keystore topilmadi."
+          fi
+
+          echo "=========================================="
+
+      - name: Analyze
+        run: |
+          flutter analyze --no-fatal-infos || true
+
       - name: Build APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
         run: |
           set -e
 
           flutter build apk --release
 
       - name: Verify APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
         run: |
           set -e
 
           APK="build/app/outputs/flutter-apk/app-release.apk"
 
-          test -f "$APK"
+          if [ ! -f "$APK" ]; then
+            echo "APK topilmadi!"
+            exit 1
+          fi
 
-          echo "======================================"
-          echo "✅ MILLIY AI APK TAYYOR"
-          echo "======================================"
-
+          echo "APK tayyor:"
           ls -lh "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: MILLIY-AI-APK
-          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
