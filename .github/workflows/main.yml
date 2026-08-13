@@ -3,26 +3,17 @@ name: Build MILLIY AI APK
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build MILLIY AI APK
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -31,297 +22,40 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Find Flutter project
-        shell: bash
+      - name: Prepare Android
         run: |
-          set -euo pipefail
+          flutter create --platforms=android --project-name=milliy_ai .
 
-          echo "Repository:"
-          ls -lah
-
-          if [ -f "pubspec.yaml" ]; then
-            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
-            exit 0
-          fi
-
-          rm -rf extracted
-          mkdir -p extracted
-
-          ZIP_FILE=""
-
-          while IFS= read -r zip; do
-            echo "Tekshirilmoqda: $zip"
-
-            if unzip -l "$zip" 2>/dev/null | grep -q "pubspec.yaml"; then
-              ZIP_FILE="$zip"
-              break
-            fi
-          done < <(find . -maxdepth 1 -type f -iname "*.zip" -print)
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "XATO: Flutter project topilmadi."
-            exit 1
-          fi
-
-          echo "Flutter ZIP: $ZIP_FILE"
-
-          unzip -q "$ZIP_FILE" -d extracted
-
-          PUBSPEC=$(find extracted -type f -name "pubspec.yaml" | head -n 1 || true)
-
-          if [ -z "$PUBSPEC" ]; then
-            echo "XATO: pubspec.yaml topilmadi."
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$PUBSPEC")
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          echo "Flutter project: $PROJECT_DIR"
-
-      - name: Prepare Android SDK
-        shell: bash
+      - name: Set NDK
         run: |
-          set -euo pipefail
-
-          SDKMANAGER=""
-
-          if [ -n "${ANDROID_HOME:-}" ] && \
-             [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
-            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          fi
-
-          if [ -z "$SDKMANAGER" ] && \
-             [ -n "${ANDROID_SDK_ROOT:-}" ] && \
-             [ -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-            SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          fi
-
-          if [ -z "$SDKMANAGER" ]; then
-            SDKMANAGER=$(find \
-              /usr/local/lib/android/sdk \
-              /opt/android-sdk \
-              -type f \
-              -name sdkmanager \
-              -perm -111 \
-              2>/dev/null | head -n 1 || true)
-          fi
-
-          if [ -z "$SDKMANAGER" ]; then
-            echo "XATO: sdkmanager topilmadi."
-            exit 1
-          fi
-
-          echo "SDKMANAGER: $SDKMANAGER"
-
-          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-
-          "$SDKMANAGER" \
-            "platform-tools" \
-            "platforms;android-36" \
-            "build-tools;36.0.0" \
-            "ndk;27.0.12077973"
-
-      - name: Generate complete Android project
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR"
-
-          echo "Flutter project:"
-          pwd
-
-          echo "Android project tekshirilmoqda..."
-
-          if [ ! -f "android/app/build.gradle.kts" ]; then
-            echo "To'liq Android project yo'q."
-            echo "flutter create ishga tushirilmoqda..."
-
-            flutter create \
-              --platforms=android \
-              --project-name=milliy_ai \
-              --org=com.milliyai \
-              .
-
-          else
-            echo "Android project mavjud."
-          fi
-
-          if [ ! -f "android/app/build.gradle.kts" ]; then
-            echo "XATO: flutter create'dan keyin ham build.gradle.kts topilmadi."
-            find android -maxdepth 4 -type f | sort
-            exit 1
-          fi
-
-          echo "Android project tayyor."
-
-      - name: Configure Android
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR"
-
-          FILE="android/app/build.gradle.kts"
-
-          python3 <<'PY'
+          python3 - <<'PY'
           from pathlib import Path
-          import re
-
-          p = Path("android/app/build.gradle.kts")
-          s = p.read_text()
-
-          # compileSdk
-          s = re.sub(
-              r'compileSdk\s*=\s*flutter\.compileSdkVersion',
-              'compileSdk = 36',
-              s
-          )
-
-          s = re.sub(
-              r'compileSdk\s*=\s*\d+',
-              'compileSdk = 36',
-              s
-          )
-
-          if not re.search(r'compileSdk\s*=\s*36', s):
-              s = s.replace(
-                  'android {',
-                  'android {\n    compileSdk = 36',
-                  1
-              )
-
-          # NDK
-          s = re.sub(
-              r'ndkVersion\s*=\s*flutter\.ndkVersion',
-              'ndkVersion = "27.0.12077973"',
-              s
-          )
-
-          s = re.sub(
-              r'ndkVersion\s*=\s*["\'][^"\']+["\']',
-              'ndkVersion = "27.0.12077973"',
-              s
-          )
-
-          if 'ndkVersion = "27.0.12077973"' not in s:
-              s = s.replace(
-                  'android {',
-                  'android {\n    ndkVersion = "27.0.12077973"',
-                  1
-              )
-
-          # minSdk
-          s = re.sub(
-              r'minSdk\s*=\s*flutter\.minSdkVersion',
-              'minSdk = 24',
-              s
-          )
-
-          s = re.sub(
-              r'minSdk\s*=\s*\d+',
-              'minSdk = 24',
-              s
-          )
-
-          s = re.sub(
-              r'minSdkVersion\s*=?\s*\d+',
-              'minSdk = 24',
-              s
-          )
-
-          if not re.search(r'minSdk\s*=\s*24', s):
-              s = s.replace(
-                  'defaultConfig {',
-                  'defaultConfig {\n        minSdk = 24',
-                  1
-              )
-
+          p=Path("android/app/build.gradle.kts")
+          s=p.read_text()
+          if "ndkVersion" in s:
+              import re
+              s=re.sub(r'ndkVersion\s*=\s*".*?"',
+                       'ndkVersion = "27.0.12077973"', s)
+          else:
+              s=s.replace("android {",
+                          'android {\n    ndkVersion = "27.0.12077973"',1)
           p.write_text(s)
           PY
 
-          echo "Android konfiguratsiyasi:"
-          grep -E "compileSdk|ndkVersion|minSdk" \
-            android/app/build.gradle.kts || true
-
-          echo "Tekshirilmoqda..."
-
-          grep -q "compileSdk = 36" \
-            android/app/build.gradle.kts
-
-          grep -q 'ndkVersion = "27.0.12077973"' \
-            android/app/build.gradle.kts
-
-          grep -q "minSdk = 24" \
-            android/app/build.gradle.kts
-
-          echo "SDK 36 OK"
-          echo "NDK 27 OK"
-          echo "minSdk 24 OK"
-
-      - name: Install dependencies
-        shell: bash
+      - name: Dependencies
         run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR"
-
           flutter clean
           flutter pub get
 
       - name: Analyze
-        shell: bash
-        run: |
-          cd "$PROJECT_DIR"
+        run: flutter analyze --no-fatal-infos
 
-          flutter analyze --no-fatal-infos || true
-
-      - name: Build APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR"
-
-          flutter build apk \
-            --release \
-            --android-skip-build-dependency-validation
-
-      - name: Verify APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          APK=$(find \
-            "$PROJECT_DIR/build/app/outputs/flutter-apk" \
-            -type f \
-            -name "*.apk" \
-            | head -n 1 || true)
-
-          if [ -z "$APK" ]; then
-            echo "XATO: APK topilmadi."
-            find "$PROJECT_DIR/build" \
-              -type f \
-              -name "*.apk" \
-              2>/dev/null || true
-            exit 1
-          fi
-
-          echo "================================"
-          echo "MILLIY AI APK TAYYOR"
-          echo "================================"
-
-          ls -lh "$APK"
-
-          mkdir -p final-apk
-          cp "$APK" final-apk/MILLIY-AI.apk
+      - name: Build
+        run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: MILLIY-AI-APK
-          path: final-apk/MILLIY-AI.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
-          retention-days: 30
