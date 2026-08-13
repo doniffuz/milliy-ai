@@ -15,7 +15,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -124,28 +123,41 @@ jobs:
             "build-tools;36.0.0" \
             "ndk;27.0.12077973"
 
-      - name: Prepare Flutter Android
+      - name: Generate complete Android project
         shell: bash
         run: |
           set -euo pipefail
 
           cd "$PROJECT_DIR"
 
-          if [ ! -f "pubspec.yaml" ]; then
-            echo "XATO: pubspec.yaml topilmadi."
-            exit 1
-          fi
+          echo "Flutter project:"
+          pwd
 
-          # Android projectni yaratamiz
-          if [ ! -d "android" ]; then
+          echo "Android project tekshirilmoqda..."
+
+          if [ ! -f "android/app/build.gradle.kts" ]; then
+            echo "To'liq Android project yo'q."
+            echo "flutter create ishga tushirilmoqda..."
+
             flutter create \
               --platforms=android \
               --project-name=milliy_ai \
               --org=com.milliyai \
               .
+
+          else
+            echo "Android project mavjud."
           fi
 
-      - name: Force Android SDK and NDK versions
+          if [ ! -f "android/app/build.gradle.kts" ]; then
+            echo "XATO: flutter create'dan keyin ham build.gradle.kts topilmadi."
+            find android -maxdepth 4 -type f | sort
+            exit 1
+          fi
+
+          echo "Android project tayyor."
+
+      - name: Configure Android
         shell: bash
         run: |
           set -euo pipefail
@@ -154,11 +166,6 @@ jobs:
 
           FILE="android/app/build.gradle.kts"
 
-          if [ ! -f "$FILE" ]; then
-            echo "XATO: $FILE topilmadi."
-            exit 1
-          fi
-
           python3 <<'PY'
           from pathlib import Path
           import re
@@ -166,10 +173,7 @@ jobs:
           p = Path("android/app/build.gradle.kts")
           s = p.read_text()
 
-          # ------------------------------------------
-          # COMPILE SDK
-          # ------------------------------------------
-
+          # compileSdk
           s = re.sub(
               r'compileSdk\s*=\s*flutter\.compileSdkVersion',
               'compileSdk = 36',
@@ -189,10 +193,7 @@ jobs:
                   1
               )
 
-          # ------------------------------------------
           # NDK
-          # ------------------------------------------
-
           s = re.sub(
               r'ndkVersion\s*=\s*flutter\.ndkVersion',
               'ndkVersion = "27.0.12077973"',
@@ -212,10 +213,7 @@ jobs:
                   1
               )
 
-          # ------------------------------------------
-          # MIN SDK
-          # ------------------------------------------
-
+          # minSdk
           s = re.sub(
               r'minSdk\s*=\s*flutter\.minSdkVersion',
               'minSdk = 24',
@@ -242,31 +240,28 @@ jobs:
               )
 
           p.write_text(s)
-
-          print("Android konfiguratsiyasi majburiy o'rnatildi.")
           PY
 
-          echo ""
-          echo "======================================"
-          echo "FINAL ANDROID CONFIG"
-          echo "======================================"
-
-          grep -E \
-            "compileSdk|ndkVersion|minSdk" \
+          echo "Android konfiguratsiyasi:"
+          grep -E "compileSdk|ndkVersion|minSdk" \
             android/app/build.gradle.kts || true
 
-          echo ""
-          echo "Tekshirish:"
+          echo "Tekshirilmoqda..."
 
-          grep -q "compileSdk = 36" android/app/build.gradle.kts
-          grep -q 'ndkVersion = "27.0.12077973"' android/app/build.gradle.kts
-          grep -q "minSdk = 24" android/app/build.gradle.kts
+          grep -q "compileSdk = 36" \
+            android/app/build.gradle.kts
 
-          echo "SDK 36 ✓"
-          echo "NDK 27 ✓"
-          echo "minSdk 24 ✓"
+          grep -q 'ndkVersion = "27.0.12077973"' \
+            android/app/build.gradle.kts
 
-      - name: Get Flutter dependencies
+          grep -q "minSdk = 24" \
+            android/app/build.gradle.kts
+
+          echo "SDK 36 OK"
+          echo "NDK 27 OK"
+          echo "minSdk 24 OK"
+
+      - name: Install dependencies
         shell: bash
         run: |
           set -euo pipefail
@@ -275,22 +270,6 @@ jobs:
 
           flutter clean
           flutter pub get
-
-      - name: Verify Flutter configuration
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR"
-
-          echo "Flutter:"
-          flutter --version
-
-          echo ""
-          echo "Android configuration:"
-          grep -E \
-            "compileSdk|ndkVersion|minSdk" \
-            android/app/build.gradle.kts || true
 
       - name: Analyze
         shell: bash
@@ -322,13 +301,17 @@ jobs:
             | head -n 1 || true)
 
           if [ -z "$APK" ]; then
-            echo "XATO: APK yaratilmagan."
+            echo "XATO: APK topilmadi."
+            find "$PROJECT_DIR/build" \
+              -type f \
+              -name "*.apk" \
+              2>/dev/null || true
             exit 1
           fi
 
-          echo "======================================"
+          echo "================================"
           echo "MILLIY AI APK TAYYOR"
-          echo "======================================"
+          echo "================================"
 
           ls -lh "$APK"
 
